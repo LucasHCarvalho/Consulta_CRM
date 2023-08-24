@@ -10,14 +10,17 @@ host = ''
 porta = ''
 sid = ''
 
+# Configurações de conexão para ignorar Case Sensitive na senha
+oracledb.init_oracle_client()
+
 # Crie uma conexão
-conn = oracledb.connect(user=username, password=password, host=host, port=porta, service_name=sid)
+conn = oracledb.connect(user=username, password=password, host=host, port=porta, service_name=service_name)
 cursor = conn.cursor()
 
 # Pesquisa Banco
-cursor.execute("SELECT NM_PRESTADOR, DS_CODIGO_CONSELHO, DECODE(TP_SITUACAO, 'A', 'ATIVO', 'I', 'INATIVO') FROM PRESTADOR WHERE CD_TIP_PRESTA = 8")
+cursor.execute("SELECT NM_PRESTADOR, DS_CODIGO_CONSELHO, DECODE(TP_SITUACAO, 'A', 'ATIVO', 'I', 'INATIVO') FROM PRESTADOR WHERE CD_TIP_PRESTA = 8 AND TP_SITUACAO = 'A'")
 
-
+# Data Atual da consulta
 data_e_hora_atuais = datetime.now()
 dh_atual = data_e_hora_atuais.strftime("%d/%m/%Y %H:%M")
 
@@ -25,7 +28,7 @@ dh_atual = data_e_hora_atuais.strftime("%d/%m/%Y %H:%M")
 linhas = cursor.fetchall()
 for linha in linhas:
     nome = linha[0]
-    crm = linha[1]
+    crm = linha[1].replace(".", '')
     ativo_sistema = linha[2]
 
     # URL da API com o crm a ser pesquisado
@@ -57,8 +60,9 @@ for linha in linhas:
         situacao = 'ATIVO'
     else:
         situacao = 'INATIVO'
-      
-    # Exportando dados alimentando em um arquivo CSV
-    with open('crm.csv', 'a', newline='', encoding='utf-8') as arquivo_csv:
-        escritor_csv = csv.writer(arquivo_csv)
-        escritor_csv.writerow([nome, nome_cremesp, nm_igual, crm, situacao, ativo_sistema, data_inativo, dh_atual])
+    
+    if situacao == 'INATIVO':
+        # Exportando dados alimentando em um arquivo CSV
+        with open('crm.csv', 'a', newline='', encoding='utf-8') as arquivo_csv:
+            escritor_csv = csv.writer(arquivo_csv)
+            escritor_csv.writerow([nome, nome_cremesp, nm_igual, crm, situacao, ativo_sistema, data_inativo, dh_atual])
