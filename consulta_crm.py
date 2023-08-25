@@ -1,6 +1,8 @@
-import csv
-import requests
+import os
 import oracledb
+import openpyxl
+import requests
+import win32com.client
 from datetime import datetime
 
 # Configurações de conexão
@@ -8,7 +10,7 @@ username = ''
 password = ''
 host = ''
 porta = ''
-sid = ''
+service_name = ''
 
 # Configurações de conexão para ignorar Case Sensitive na senha
 oracledb.init_oracle_client()
@@ -18,21 +20,34 @@ conn = oracledb.connect(user=username, password=password, host=host, port=porta,
 cursor = conn.cursor()
 
 # Pesquisa Banco
-cursor.execute("SELECT NM_PRESTADOR, DS_CODIGO_CONSELHO, DECODE(TP_SITUACAO, 'A', 'ATIVO', 'I', 'INATIVO') FROM PRESTADOR WHERE CD_TIP_PRESTA = 8 AND TP_SITUACAO = 'A'")
+cursor.execute("SELECT MEDICO FROM MEDICO")
+
+# Retorno das pesquisas
+linhas = cursor.fetchall()
 
 # Data Atual da consulta
 data_e_hora_atuais = datetime.now()
 dh_atual = data_e_hora_atuais.strftime("%d/%m/%Y %H:%M")
 
-# Retorno das pesquisas
-linhas = cursor.fetchall()
+caminho_excel = 'crm.xlsx'
+arquivo_excel = openpyxl.load_workbook(caminho_excel)
+
+# Ou use a planilha ativa padrão
+planilha = arquivo_excel.active
+
+dados_para_inserir = [
+    ['Nome Cadastro SOUL', 'Nome Cadastro Cremesp', 'CRM', 'Situação SOUL', 'Situação Cremesp', 'Data Inativação Cremesp', 'Data Consulta', 'Obs']
+]
+
 for linha in linhas:
-    nome = linha[0]
-    crm = linha[1].replace(".", '')
-    ativo_sistema = linha[2]
+    lista_medico = [None] * 8
+    lista_medico[0] = linha[0]
+    lista_medico[2] = linha[1].replace(".", '')
+    lista_medico[3] = linha[2]
+    lista_medico[6] = dh_atual
 
     # URL da API com o crm a ser pesquisado
-    url = f'https://api.cremesp.org.br/guia-medico/medico-info/{crm}'
+    url = f'https://api.cremesp.org.br/guia-medico/medico-info/{lista_medico[2]}'
 
     # Realize uma solicitação GET à API
     response = requests.get(url)
@@ -43,26 +58,79 @@ for linha in linhas:
         dados = response.json()
 
         # Recebimento dos dados necessários
-        nome_cremesp = dados.get("nome")
+        lista_medico[1] = dados.get("nome")
         situacao = dados.get("situacao")
-        data_inativo = dados.get("mensagemStatus")
+        lista_medico[5] = dados.get("mensagemStatus")
     else:
-        nome_cremesp = 'Não Encontrado'
+        lista_medico[1] = 'Não Encontrado'
         situacao = 'Não Encontrado'
-        data_inativo = 'Não Encontrado'
+        lista_medico[5] = 'Não Encontrado'
 
-    if nome.lower() != nome_cremesp.lower():
+    if lista_medico[0].lower() != lista_medico[1].lower():
         nm_igual = False
     else:
         nm_igual = True
     
-    if situacao == 'A':
-        situacao = 'ATIVO'
-    else:
-        situacao = 'INATIVO'
+    if not nm_igual:
+        lista_medico[7] = 'Nome diferente'
     
-    if situacao == 'INATIVO':
-        # Exportando dados alimentando em um arquivo CSV
-        with open('crm.csv', 'a', newline='', encoding='utf-8') as arquivo_csv:
-            escritor_csv = csv.writer(arquivo_csv)
-            escritor_csv.writerow([nome, nome_cremesp, nm_igual, crm, situacao, ativo_sistema, data_inativo, dh_atual])
+    if situacao == 'A':
+        lista_medico[4] = 'ATIVO'
+    else:
+        lista_medico[4] = 'INATIVO'
+
+    if lista_medico[4] == 'INATIVO' or not nm_igual:
+        dados_para_inserir.append(lista_medico)
+
+for i, dado in enumerate(dados_para_inserir, start=1):
+    planilha.cell(row=i, column=1, value=dado[0])
+    planilha.cell(row=i, column=2, value=dado[1])
+    planilha.cell(row=i, column=3, value=dado[2])
+    planilha.cell(row=i, column=4, value=dado[3])
+    planilha.cell(row=i, column=5, value=dado[4])
+    planilha.cell(row=i, column=6, value=dado[5])
+    planilha.cell(row=i, column=7, value=dado[6])
+    planilha.cell(row=i, column=8, value=dado[7])
+
+arquivo_excel.save(caminho_excel)
+arquivo_excel.close()
+
+# Importe a classe Outlook Application
+outlook = win32com.client.Dispatch("Outlook.Application")
+
+# Crie um novo e-mail
+mail = outlook.CreateItem(0)
+
+# Anexe o arquivo CSV
+anexo = os.path.abspath(caminho_excel)
+mail.Attachments.Add(anexo)
+
+# Defina o assunto do e-mail
+mail.Subject = "Crm Inativo Cremesp"
+
+# Defina o corpo do e-mail
+data_e_hora_atuais = datetime.now()
+data_e_hora_atuais = data_e_hora_atuais.strftime("%H:%M")
+
+if data_e_hora_atuais < '12:00':
+    saudacao = 'Bom dia!'
+if data_e_hora_atuais < '18:00':
+    saudacao = 'Boa tarde!'
+else:
+    saudacao = 'Boa noite!'
+
+texto = ''' 
+
+Identificamos através de uma consulta no Cremesp que os médicos da relação, encontram-se com o seu CRM inativo no Conselho Regional de Medicina.
+Os mesmos estão cadastrados e com situação Ativa dentro da plataforma SOUL-MV.
+'''
+assinatura = '''
+'''
+
+mail.Body = saudacao + texto + assinatura
+
+# Defina o destinatário do e-mail
+mail.To = ""
+
+# Envie o e-mail
+# mail.Send()
